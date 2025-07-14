@@ -40,8 +40,18 @@ TEAM_LIST = [
 def build_team_buttons():
     taken = [p['team'] for p in load_data().get("players", {}).values()]
     available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
-    keyboard = [[f"{f} {n}", f"{f2} {n2}"] for (f, n), (f2, n2) in zip(available[::2], available[1::2])]
+
+    keyboard = []
+    for i in range(0, len(available), 2):
+        row = []
+        if i < len(available):
+            row.append(f"{available[i][0]} {available[i][1]}")
+        if i + 1 < len(available):
+            row.append(f"{available[i+1][0]} {available[i+1][1]}")
+        keyboard.append(row)
+
     return keyboard
+
 
 async def unlock_after_timeout():
     global REGISTERING_USER, REGISTER_LOCK_TASK
@@ -135,9 +145,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['team'] = update.message.text
-    await update.message.reply_text("Now enter your PES username:")
+    selected = update.message.text.strip()
+    data = load_data()
+    
+    taken_teams = [p['team'] for p in data.get("players", {}).values()]
+    available_teams = [f"{f} {n}" for f, n in TEAM_LIST if f"{f} {n}" not in taken_teams]
+
+    if selected not in available_teams:
+        await update.message.reply_text("❌ Invalid or already taken team. Please choose from the keyboard below.")
+        return REGISTER_TEAM
+
+    context.user_data['team'] = selected
+    await update.message.reply_text(f"✅ Team selected: {selected}\n\nNow send your PES username:")
     return ENTER_PES
+
 
 async def get_pes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REGISTERING_USER, REGISTER_LOCK_TASK
