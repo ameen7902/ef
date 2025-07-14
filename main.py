@@ -514,8 +514,8 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("register", register)],
         states={
-            REGISTER_TEAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_team)],
-            ENTER_PES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pes)],
+            REGISTER_TEAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_team_selection)],
+            ENTER_PES: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pes_name)],
         },
         fallbacks=[],
     )
