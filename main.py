@@ -65,8 +65,16 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = load_data()
-    if str(user.id) in data.get("players", {}):
+    players = data.get("players", {})
+    if str(user.id) in players:
         await update.message.reply_text("✅ You are already registered.")
+        return
+
+    # ✅ Check if all 32 teams are taken
+    taken = [p['team'] for p in players.values()]
+    available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
+    if not available:
+        await update.message.reply_text("Registration is now closed.32/32 qualified for WC 2014")
         return
 
     try:
@@ -87,6 +95,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Forbidden:
         await update.message.reply_text("❌ Please start the bot in DM first: @e_tournament_bot")
+
 # === Gist Storage ===
 def load_data():
     url = f"https://api.github.com/gists/{GIST_ID}"
@@ -123,34 +132,7 @@ def save_data(data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Welcome to the eFootball Tournament! Use /register to join.")
 
-async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ Please use /register in the tournament group.")
-        return
 
-
-
-    user_id = str(update.effective_user.id)
-    data = load_data()
-    players = data.get("players", {})
-    
-    if user_id in players:
-        await update.message.reply_text("⚠️ You are already registered.")
-        return ConversationHandler.END
-
-    taken = [p['team'] for p in players.values()]
-    available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
-    
-    if not available:
-        await update.message.reply_text("❌ All teams are taken!")
-        return ConversationHandler.END
-
-    keyboard = [[f"{f} {n}"] for f, n in available]
-    await update.message.reply_text(
-        "Select your national team:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-    )
-    return REGISTER_TEAM
 
 async def get_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['team'] = update.message.text
