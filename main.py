@@ -13,7 +13,7 @@ from telegram.ext import (
 BOT_TOKEN = "7989043314:AAFkx9oHbOZdXI0MWOCafcx2Ts-Jv5pb_zE"
 GIST_ID = "a9efcdad8e4bf7ca411b055ac6e5c4a6"
 GIST_TOKEN = "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"
-GIST_FILENAME = "db.json"
+GIST_FILENAME = "tournament.json"
 
 ADMIN_ID = 7366894756
 GROUP_ID = -1002835703789
