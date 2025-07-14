@@ -12,6 +12,8 @@ from telegram import ReplyKeyboardMarkup
 from telegram.error import Forbidden
 import random
 import asyncio
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import CallbackContext, ConversationHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GIST_ID = os.getenv("GIST_ID")
@@ -35,76 +37,210 @@ TEAM_LIST = [
     ("🇬🇭", "Ghana"), ("🇨🇱", "Chile"), ("🇰🇷", "South Korea"), ("🇨🇳", "China"),
     ("🇳🇬", "Nigeria"), ("🇲🇦", "Morocco"), ("🇦🇺", "Australia"), ("🇸🇳", "Senegal")
 ]
+REGISTER_LOCK = None
+LOCKED_TEAM = None
 
+def is_locked():
+    return REGISTER_LOCK is not None
+
+def lock_user(user_id):
+    global REGISTER_LOCK
+    REGISTER_LOCK = user_id
+
+def unlock_user():
+    global REGISTER_LOCK, LOCKED_TEAM
+    REGISTER_LOCK = None
+    LOCKED_TEAM = None
+
+def get_locked_user():
+    return REGISTER_LOCK
+
+def set_selected_team(team):
+    global LOCKED_TEAM
+    LOCKED_TEAM = team
+
+def get_locked_team():
+    return LOCKED_TEAM
 
 def build_team_buttons():
-    taken = [p['team'] for p in load_data().get("players", {}).values()]
-    available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
+    players = load_data().get("players", {})
+    taken = [p['team'] for p in players.values()]
+    available = [(flag, name) for flag, name in TEAM_LIST if f"{flag} {name}" not in taken]
 
     keyboard = []
-    for i in range(0, len(available), 2):
-        row = []
-        if i < len(available):
-            row.append(f"{available[i][0]} {available[i][1]}")
-        if i + 1 < len(available):
-            row.append(f"{available[i+1][0]} {available[i+1][1]}")
+    row = []
+    for flag, name in available:
+        row.append(InlineKeyboardButton(f"{flag} {name}", callback_data=f"{flag} {name}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
         keyboard.append(row)
-
     return keyboard
 
+def set_commands(bot):
+    from telegram import BotCommand
+    commands = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("register", "Register for the tournament"),
+        BotCommand("fixtures", "View your next match"),
+        BotCommand("rules", "Show tournament rules"),
+        BotCommand("players", "List registered players"),
+        BotCommand("addscore", "Admin: Add match scores"),
+        BotCommand("addrule", "Admin: Add a rule"),
+    ]
+    bot.set_my_commands(commands)
 
-async def unlock_after_timeout():
-    global REGISTERING_USER, REGISTER_LOCK_TASK
-    await asyncio.sleep(300)  # 5 minutes = 300 seconds
-    REGISTERING_USER = None
-    REGISTER_LOCK_TASK = None
-    print("🔓 Registration unlocked due to timeout.")
-
-async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global REGISTERING_USER, REGISTER_LOCK_TASK
+def register(update: Update, context: CallbackContext):
     user = update.effective_user
 
-    # ✅ Only allow /register inside group
     if update.effective_chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ Please use /register in the tournament group.")
+        update.message.reply_text("❌ Please use /register in the tournament group.")
         return
 
-    # ✅ Check if someone is registering
-    if REGISTERING_USER and REGISTERING_USER != user.id:
-        await update.message.reply_text("⚠️ Someone else is registering. Try again in a few minutes.")
+    if is_locked():
+        update.message.reply_text("⚠️ Another player is registering. Please try again in a few minutes.")
         return
 
-    data = load_data()
-    players = data.get("players", {})
+    players = load_data().get("players", {})
     if str(user.id) in players:
-        await update.message.reply_text("✅ You are already registered.")
+        update.message.reply_text("✅ You are already registered.")
         return
 
-    # ✅ Check if all 32 teams are taken
-    taken = [p['team'] for p in players.values()]
-    available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
-    if not available:
-        await update.message.reply_text("Registration is now closed.32/32 qualified for WC 2014")
-        return
+    lock_user(user.id)
 
     try:
-        # ✅ Send DM with reply keyboard
-        await context.bot.send_message(
+        context.bot.send_message(
             chat_id=user.id,
             text="📝 Let's get you registered!\nPlease select your national team:",
-            reply_markup=ReplyKeyboardMarkup(build_team_buttons(), one_time_keyboard=True)
+            reply_markup=InlineKeyboardMarkup(build_team_buttons())
         )
-        await update.message.reply_text("📩 Check your DM to complete registration.")
-        
-        REGISTERING_USER = user.id
+        update.message.reply_text("📩 Check your DM to complete registration.")
+    except:
+        update.message.reply_text("❌ Couldn't send DM. Please start the bot first: @e_tournament_bot")
+        unlock_user()
 
-        # ✅ Start 5-min timeout task
-        if REGISTER_LOCK_TASK:
-            REGISTER_LOCK_TASK.cancel()
-        REGISTER_LOCK_TASK = asyncio.create_task(unlock_after_timeout())
+def handle_team_selection(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user = query.from_user
+    query.answer()
 
-    except Forbidden:
-        await update.message.reply_text("❌ Please start the bot in DM first: @e_tournament_bot")
+    if user.id != get_locked_user():
+        query.edit_message_text("⚠️ You are not allowed to register now. Please wait your turn.")
+        return
+
+    team = query.data
+    set_selected_team(team)
+
+    query.edit_message_text(f"✅ Team selected: {team}\n\nNow send your PES username:")
+
+    return REGISTER_PES
+
+def receive_pes_name(update: Update, context: CallbackContext):
+    user = update.effective_user
+    pes_name = update.message.text.strip()
+    data = load_data()
+    players = data.setdefault("players", {})
+
+    team = get_locked_team()
+    if not team:
+        update.message.reply_text("❌ Something went wrong. Try /register again.")
+        unlock_user()
+        return ConversationHandler.END
+
+    # Group assignment logic
+    groups = {g: 0 for g in "ABCDEFGH"}
+    for p in players.values():
+        if 'group' in p:
+            groups[p['group']] += 1
+    available_groups = [g for g, count in groups.items() if count < 4]
+    if not available_groups:
+        update.message.reply_text("❌ All groups are full.")
+        unlock_user()
+        return ConversationHandler.END
+    group = random.choice(available_groups)
+
+    players[str(user.id)] = {
+        "name": user.first_name,
+        "username": user.username or "NoUsername",
+        "team": team,
+        "pes": pes_name,
+        "group": group
+    }
+
+    save_data(data)
+    unlock_user()
+
+    context.bot.send_message(chat_id=user.id, text=f"✅ Registered!\n🏳️ Team: {team}\n🎮 PES: {pes_name}")
+    random_emoji = random.choice(["⚽", "🥅", "🔥", "🎯", "🏆"])
+    context.bot.send_message(
+        chat_id=GROUP_ID,
+        text=f"📝 Registration Update: {user.first_name} ({team}) is allotted to Group {group}! {random_emoji}"
+    )
+
+    if len(players) == 32:
+        context.bot.send_message(chat_id=GROUP_ID, text="🎉 All 32 players have registered! Let the tournament begin!")
+        make_fixtures(context)
+
+    return ConversationHandler.END
+
+
+# def build_team_buttons():
+#     taken = [p['team'] for p in load_data().get("players", {}).values()]
+#     available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
+
+#     keyboard = []
+#     for i in range(0, len(available), 2):
+#         row = []
+#         if i < len(available):
+#             row.append(f"{available[i][0]} {available[i][1]}")
+#         if i + 1 < len(available):
+#             row.append(f"{available[i+1][0]} {available[i+1][1]}")
+#         keyboard.append(row)
+
+#     return keyboard
+
+
+# async def unlock_after_timeout():
+#     global REGISTERING_USER, REGISTER_LOCK_TASK
+#     await asyncio.sleep(300)  # 5 minutes = 300 seconds
+#     REGISTERING_USER = None
+#     REGISTER_LOCK_TASK = None
+#     print("🔓 Registration unlocked due to timeout.")
+
+# from telegram import Update, InlineKeyboardMarkup
+# from telegram.ext import CallbackContext
+
+# def register(update: Update, context: CallbackContext):
+#     user = update.effective_user
+
+#     if update.effective_chat.type != "group" and update.effective_chat.type != "supergroup":
+#         update.message.reply_text("❌ Please use /register in the tournament group.")
+#         return
+
+#     if is_locked():
+#         update.message.reply_text("⚠️ Another player is registering. Please try again in a few minutes.")
+#         return
+
+#     players = load_json(players_file)
+#     if str(user.id) in players:
+#         update.message.reply_text("✅ You are already registered.")
+#         return
+
+#     # Lock this user
+#     lock_user(user.id)
+
+#     try:
+#         context.bot.send_message(
+#             chat_id=user.id,
+#             text="📝 Let's get you registered!\nPlease select your national team:",
+#             reply_markup=InlineKeyboardMarkup(build_team_buttons())
+#         )
+#         update.message.reply_text("📩 Check your DM to complete registration.")
+#     except:
+#         update.message.reply_text("❌ Couldn't send DM. Please start the bot first: @e_tournament_bot")
+#         unlock_user()
+
 
 # === Gist Storage ===
 def load_data():
@@ -144,20 +280,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-async def get_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected = update.message.text.strip()
-    data = load_data()
+# async def get_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     selected = update.message.text.strip()
+#     data = load_data()
     
-    taken_teams = [p['team'] for p in data.get("players", {}).values()]
-    available_teams = [f"{f} {n}" for f, n in TEAM_LIST if f"{f} {n}" not in taken_teams]
+#     taken_teams = [p['team'] for p in data.get("players", {}).values()]
+#     available_teams = [f"{f} {n}" for f, n in TEAM_LIST if f"{f} {n}" not in taken_teams]
 
-    if selected not in available_teams:
-        await update.message.reply_text("❌ Invalid or already taken team. Please choose from the keyboard below.")
-        return REGISTER_TEAM
+#     if selected not in available_teams:
+#         await update.message.reply_text("❌ Invalid or already taken team. Please choose from the keyboard below.")
+#         return REGISTER_TEAM
 
-    context.user_data['team'] = selected
-    await update.message.reply_text(f"✅ Team selected: {selected}\n\nNow send your PES username:")
-    return ENTER_PES
+#     context.user_data['team'] = selected
+#     await update.message.reply_text(f"✅ Team selected: {selected}\n\nNow send your PES username:")
+#     return ENTER_PES
 
 
 async def get_pes(update: Update, context: ContextTypes.DEFAULT_TYPE):
