@@ -35,9 +35,19 @@ TEAM_LIST = [
 def load_data():
     url = f"https://api.github.com/gists/{GIST_ID}"
     headers = {"Authorization": f"Bearer {GIST_TOKEN}"}
-    res = requests.get(url, headers=headers).json()
-    raw = res['files'][GIST_FILENAME]['content']
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        raise Exception(f"Failed to load gist: {res.status_code} - {res.text}")
+
+    res_json = res.json()
+
+    if 'files' not in res_json or GIST_FILENAME not in res_json['files']:
+        raise KeyError(f"Gist file '{GIST_FILENAME}' not found in response: {res_json}")
+
+    raw = res_json['files'][GIST_FILENAME]['content']
     return json.loads(raw)
+
 
 def save_data(data):
     url = f"https://api.github.com/gists/{GIST_ID}"
