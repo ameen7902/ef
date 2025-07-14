@@ -10,10 +10,11 @@ from telegram.ext import (
 )
 
 # === Configuration ===
-BOT_TOKEN = "7989043314:AAFkx9oHbOZdXI0MWOCafcx2Ts-Jv5pb_zE"
-GIST_ID = "a9efcdad8e4bf7ca411b055ac6e5c4a6"
-GIST_TOKEN = "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"
-GIST_FILENAME = "tournament.json"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GIST_ID = os.getenv("GIST_ID")
+GIST_FILENAME = os.getenv("GIST_FILENAME")
+GIST_TOKEN = os.getenv("GIST_TOKEN")
+
 
 ADMIN_ID = 7366894756
 GROUP_ID = -1002835703789
