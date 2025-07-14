@@ -8,14 +8,18 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ContextTypes, ConversationHandler
 )
+from telegram import ReplyKeyboardMarkup
+from telegram.error import Forbidden
+import random
+import asyncio
 
-# === Configuration ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GIST_ID = os.getenv("GIST_ID")
 GIST_FILENAME = os.getenv("GIST_FILENAME")
 GIST_TOKEN = os.getenv("GIST_TOKEN")
 
-
+REGISTERING_USER = None
+REGISTER_LOCK_TASK = None
 ADMIN_ID = 7366894756
 GROUP_ID = -1002835703789
 
@@ -32,6 +36,57 @@ TEAM_LIST = [
     ("🇳🇬", "Nigeria"), ("🇲🇦", "Morocco"), ("🇦🇺", "Australia"), ("🇸🇳", "Senegal")
 ]
 
+
+def build_team_buttons():
+    taken = [p['team'] for p in load_data().get("players", {}).values()]
+    available = [(f, n) for f, n in TEAM_LIST if f"{f} {n}" not in taken]
+    keyboard = [[f"{f} {n}", f"{f2} {n2}"] for (f, n), (f2, n2) in zip(available[::2], available[1::2])]
+    return keyboard
+
+async def unlock_after_timeout():
+    global REGISTERING_USER, REGISTER_LOCK_TASK
+    await asyncio.sleep(300)  # 5 minutes = 300 seconds
+    REGISTERING_USER = None
+    REGISTER_LOCK_TASK = None
+    print("🔓 Registration unlocked due to timeout.")
+
+async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global REGISTERING_USER, REGISTER_LOCK_TASK
+    user = update.effective_user
+
+    # ✅ Only allow /register inside group
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❌ Please use /register in the tournament group.")
+        return
+
+    # ✅ Check if someone is registering
+    if REGISTERING_USER and REGISTERING_USER != user.id:
+        await update.message.reply_text("⚠️ Someone else is registering. Try again in a few minutes.")
+        return
+
+    data = load_data()
+    if str(user.id) in data.get("players", {}):
+        await update.message.reply_text("✅ You are already registered.")
+        return
+
+    try:
+        # ✅ Send DM with reply keyboard
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="📝 Let's get you registered!\nPlease select your national team:",
+            reply_markup=ReplyKeyboardMarkup(build_team_buttons(), one_time_keyboard=True)
+        )
+        await update.message.reply_text("📩 Check your DM to complete registration.")
+        
+        REGISTERING_USER = user.id
+
+        # ✅ Start 5-min timeout task
+        if REGISTER_LOCK_TASK:
+            REGISTER_LOCK_TASK.cancel()
+        REGISTER_LOCK_TASK = asyncio.create_task(unlock_after_timeout())
+
+    except Forbidden:
+        await update.message.reply_text("❌ Please start the bot in DM first: @e_tournament_bot")
 # === Gist Storage ===
 def load_data():
     url = f"https://api.github.com/gists/{GIST_ID}"
@@ -101,6 +156,8 @@ async def get_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_PES
 
 async def get_pes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global REGISTERING_USER, REGISTER_LOCK_TASK
+
     user = update.effective_user
     team = context.user_data['team']
     pes_name = update.message.text
@@ -130,14 +187,33 @@ async def get_pes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data["players"] = players
     save_data(data)
 
+    # 🔓 Clear lock + cancel timeout
+    REGISTERING_USER = None
+    if REGISTER_LOCK_TASK:
+        REGISTER_LOCK_TASK.cancel()
+
+    # ✅ DM confirmation
     await update.message.reply_text(
-        f"✅ Registered!\n"
+        f"✅ You are successfully registered!\n\n"
         f"🏳️ Team: {team}\n"
-        f"🎮 PES: {pes_name}\n"
-        f"📍 Group {group}\n"
-        f"Get ready to compete!"
+        f"🎮 PES Username: {pes_name}\n"
+        f"📍 You have been placed in Group {group}\n\n"
+        f"⚔️ Wait for fixtures and get ready!"
     )
+
+    # 📣 Group message (monospace/MarkdownV2)
+       
+
+    emojis = ["🎯", "⚽", "🏆", "🔥", "🚀", "📣", "🥅", "🥳"]
+    emoji = random.choice(emojis)
+
+    group_msg = f"📝 Registration Update: {user.first_name} ({team}) is allotted to Group {group}! {emoji}"
+    await context.bot.send_message(chat_id=GROUP_ID, text=group_msg)
+
+
+    await context.bot.send_message(chat_id=GROUP_ID, text=group_msg, parse_mode='MarkdownV2')
     return ConversationHandler.END
+
 # === Fixtures Command ===
 async def fixtures(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
