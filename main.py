@@ -125,8 +125,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("📩 Please message me in DM to register.")
+        await update.message.reply_text("❌ Please use /register in the tournament group.")
         return
+
 
 
     user_id = str(update.effective_user.id)
