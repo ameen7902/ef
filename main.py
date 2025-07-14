@@ -124,9 +124,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Welcome to the eFootball Tournament! Use /register to join.")
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-    await update.message.reply_text("📩 Please message me in DM to register.")
-    return
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("📩 Please message me in DM to register.")
+        return
+
 
     user_id = str(update.effective_user.id)
     data = load_data()
