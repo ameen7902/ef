@@ -69,8 +69,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Welcome to the eFootball Tournament! Use /register to join.")
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
+    if update.effective_chat.type != "private":
+    await update.message.reply_text("📩 Please message me in DM to register.")
+    return
+
     user_id = str(update.effective_user.id)
     data = load_data()
     players = data.get("players", {})
